@@ -68,6 +68,8 @@ export const GAME_CONFIG = {
   map: {
     baseX: 6,
     baseY: 12,
+    width: 13,
+    height: 13,
   },
 } as const;
 
