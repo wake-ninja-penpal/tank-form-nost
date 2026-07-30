@@ -1,6 +1,7 @@
 import * as PIXI from 'pixi.js';
 import { GAME_CONFIG } from '../config/gameConfig';
 import { LayerManager } from '../core/LayerManager';
+import { LayerType } from '../core/LayerManager';
 
 /**
  * Game Over Sequence Manager
@@ -100,7 +101,7 @@ export class GameOverSequence {
       particle.scale.set(0.3);
       particle.alpha = 1;
       this.particles.push(particle);
-      this.layerManager.getLayer('ParticleLayer').addChild(particle);
+      this.layerManager.getLayer(LayerType.Particle).addChild(particle);
     }
 
     // Hide original base
@@ -139,7 +140,7 @@ export class GameOverSequence {
     // Game Over text would be added here
     // Using BitmapText from existing UI system
 
-    this.layerManager.getLayer('UILayer').addChild(this.modalContainer);
+    this.layerManager.getLayer(LayerType.UI).addChild(this.modalContainer);
   }
 
   /**
@@ -154,7 +155,7 @@ export class GameOverSequence {
       p.rotation += delta * 2;
 
       if (p.alpha <= 0) {
-        this.layerManager?.getLayer('ParticleLayer').removeChild(p);
+        this.layerManager?.getLayer(LayerType.Particle).removeChild(p);
         p.destroy();
         this.particles.splice(i, 1);
       }

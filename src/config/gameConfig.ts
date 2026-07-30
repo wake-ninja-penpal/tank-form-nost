@@ -11,6 +11,11 @@ export const GAME_CONFIG = {
     spriteSize: 32,
   },
   
+  // UI
+  ui: {
+    fontName: 'steelFont',
+  },
+  
   // Время (Fixed Timestep)
   time: {
     fixedDelta: 1 / 60, // 16.6мс

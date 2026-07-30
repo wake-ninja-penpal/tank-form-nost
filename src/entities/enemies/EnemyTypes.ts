@@ -206,7 +206,6 @@ export class WaveSystem {
    * Spawn next enemy based on wave config
    */
   private spawnNextEnemy(): void {
-    const config = this.getCurrentWaveConfig();
     // Implementation would call EntityFactory to spawn enemy
     // This is handled by the game scene
   }
