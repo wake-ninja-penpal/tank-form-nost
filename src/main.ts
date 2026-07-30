@@ -1,17 +1,19 @@
-import { Application } from 'pixi.js';
+import { Application, Sprite } from 'pixi.js';
 import { LayerManager, IDisposable } from './core/LayerManager';
 import { TimeManager } from './core/TimeManager';
 import { PauseSystem } from './systems/PauseSystem';
 import { SaveManager } from './core/SaveManager';
+import { ProceduralTextureFactory } from './core/ProceduralTextureFactory';
 
 /**
  * Основной класс игры "СТАЛЬНОЙ РУБЕЖ"
- * Интегрирует все системы Этапа 1:
+ * Интегрирует все системы Этапа 1-2:
  * - PixiJS v8 с Retina и WebGL (Правило 1, 5)
  * - Слои рендера (Правило 2)
  * - Fixed Timestep физика (Правило 4)
  * - Авто-пауза (Правило 13)
  * - SaveManager (Правило 14)
+ * - ProceduralTextureFactory (CanvasSource v8)
  */
 export class Game implements IDisposable {
   public readonly app: Application;
@@ -48,7 +50,10 @@ export class Game implements IDisposable {
     const width = window.innerWidth;
     const height = window.innerHeight;
 
-    // Создание PixiJS приложения с Retina и WebGL
+    // 1. Инициализация процедурных текстур (CanvasSource v8)
+    ProceduralTextureFactory.init();
+
+    // 2. Создание PixiJS приложения с Retina и WebGL
     await this.app.init({
       width,
       height,
@@ -58,19 +63,51 @@ export class Game implements IDisposable {
       autoDensity: true,
     });
 
-    // Добавление canvas в DOM
+    // 3. Добавление canvas в DOM
     const container = document.getElementById('app');
     if (container) {
-      container.appendChild(this.app.canvas);
+      container.appendChild(this.app.canvas as HTMLCanvasElement);
     }
 
-    // Добавление корневого контейнера слоёв на сцену
+    // 4. Добавление корневого контейнера слоёв на сцену
     this.app.stage.addChild(this.layerManager.root);
 
-    // Настройка обработки изменения размера окна (Правило 11: Zero-Allocation)
+    // 5. Добавление тестовых спрайтов для проверки рендера
+    this.addTestSprites();
+
+    // 6. Настройка обработки изменения размера окна (Правило 11: Zero-Allocation)
     window.addEventListener('resize', this._boundOnResize, { passive: true });
 
-    console.log('[Game] Initialized with PixiJS v8, Retina DPI, WebGL');
+    console.log('[Game] Initialized with PixiJS v8, Retina DPI, WebGL, Procedural Textures');
+  }
+
+  /**
+   * Добавление тестовых спрайтов на слои для проверки рендера
+   */
+  private addTestSprites(): void {
+    // Спрайт земли на GroundLayer
+    const groundTexture = ProceduralTextureFactory.getTexture('ground');
+    const groundSprite = new Sprite(groundTexture);
+    groundSprite.x = 100;
+    groundSprite.y = 100;
+    this.layerManager.groundLayer.addChild(groundSprite);
+
+    // Спрайт стены на WallLayer
+    const wallTexture = ProceduralTextureFactory.getTexture('wall');
+    const wallSprite = new Sprite(wallTexture);
+    wallSprite.x = 200;
+    wallSprite.y = 200;
+    this.layerManager.wallLayer.addChild(wallSprite);
+
+    // Спрайт танка на TankLayer
+    const tankTexture = ProceduralTextureFactory.getTexture('tank_body');
+    const tankSprite = new Sprite(tankTexture);
+    tankSprite.x = 400;
+    tankSprite.y = 300;
+    tankSprite.scale.set(2);
+    this.layerManager.tankLayer.addChild(tankSprite);
+
+    console.log('[Game] Test sprites added to layers');
   }
 
   /**
