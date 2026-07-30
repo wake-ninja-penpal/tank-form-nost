@@ -1,4 +1,4 @@
-import { Application, Sprite } from 'pixi.js';
+import * as PIXI from 'pixi.js';
 import { LayerManager, IDisposable } from './core/LayerManager';
 import { TimeManager } from './core/TimeManager';
 import { PauseSystem } from './systems/PauseSystem';
@@ -16,7 +16,7 @@ import { ProceduralTextureFactory } from './core/ProceduralTextureFactory';
  * - ProceduralTextureFactory (CanvasSource v8)
  */
 export class Game implements IDisposable {
-  public readonly app: Application;
+  public readonly app: PIXI.Application;
   public readonly layerManager: LayerManager;
   public readonly timeManager: TimeManager;
   public readonly pauseSystem: PauseSystem;
@@ -27,7 +27,7 @@ export class Game implements IDisposable {
   private _boundOnResize: () => void;
 
   constructor() {
-    this.app = new Application();
+    this.app = new PIXI.Application();
     this.layerManager = new LayerManager();
     this.timeManager = new TimeManager();
     this.pauseSystem = new PauseSystem();
@@ -61,12 +61,15 @@ export class Game implements IDisposable {
       preference: 'webgl',
       resolution: window.devicePixelRatio || 1,
       autoDensity: true,
+      antialias: false, // Отключаем сглаживание для пиксель-арта
     });
 
     // 3. Добавление canvas в DOM
     const container = document.getElementById('app');
     if (container) {
       container.appendChild(this.app.canvas as HTMLCanvasElement);
+    } else {
+      console.error('[Game] Container #app not found!');
     }
 
     // 4. Добавление корневого контейнера слоёв на сцену
@@ -79,6 +82,7 @@ export class Game implements IDisposable {
     window.addEventListener('resize', this._boundOnResize, { passive: true });
 
     console.log('[Game] Initialized with PixiJS v8, Retina DPI, WebGL, Procedural Textures');
+    console.log(`[Game] Canvas size: ${width}x${height}, DPI: ${window.devicePixelRatio}`);
   }
 
   /**
@@ -87,27 +91,66 @@ export class Game implements IDisposable {
   private addTestSprites(): void {
     // Спрайт земли на GroundLayer
     const groundTexture = ProceduralTextureFactory.getTexture('ground');
-    const groundSprite = new Sprite(groundTexture);
+    const groundSprite = new PIXI.Sprite(groundTexture);
     groundSprite.x = 100;
     groundSprite.y = 100;
+    groundSprite.scale.set(3);
     this.layerManager.groundLayer.addChild(groundSprite);
 
     // Спрайт стены на WallLayer
     const wallTexture = ProceduralTextureFactory.getTexture('wall');
-    const wallSprite = new Sprite(wallTexture);
+    const wallSprite = new PIXI.Sprite(wallTexture);
     wallSprite.x = 200;
     wallSprite.y = 200;
+    wallSprite.scale.set(3);
     this.layerManager.wallLayer.addChild(wallSprite);
 
     // Спрайт танка на TankLayer
     const tankTexture = ProceduralTextureFactory.getTexture('tank_body');
-    const tankSprite = new Sprite(tankTexture);
+    const tankSprite = new PIXI.Sprite(tankTexture);
     tankSprite.x = 400;
     tankSprite.y = 300;
-    tankSprite.scale.set(2);
+    tankSprite.scale.set(3);
     this.layerManager.tankLayer.addChild(tankSprite);
 
+    // Тестовая кнопка на UILayer
+    this.addTestUIButton();
+
     console.log('[Game] Test sprites added to layers');
+  }
+
+  /**
+   * Добавление тестовой кнопки UI
+   */
+  private addTestUIButton(): void {
+    // Создаем простую кнопку из графики для теста UI слоя
+    const buttonGraphics = new PIXI.Graphics();
+    buttonGraphics.rect(0, 0, 150, 50);
+    buttonGraphics.fill(0x4a90d9);
+    buttonGraphics.stroke({ width: 2, color: 0xffffff });
+    
+    // Генерируем текстуру из графики (PixiJS v8 API)
+    const buttonTexture = this.app.renderer.generateTexture(buttonGraphics);
+    buttonGraphics.destroy();
+
+    const buttonSprite = new PIXI.Sprite(buttonTexture);
+    buttonSprite.x = 50;
+    buttonSprite.y = 50;
+    buttonSprite.eventMode = 'static';
+    buttonSprite.cursor = 'pointer';
+
+    // Обработчики событий
+    buttonSprite.on('pointerover', () => {
+      buttonSprite.alpha = 0.8;
+    });
+    buttonSprite.on('pointerout', () => {
+      buttonSprite.alpha = 1.0;
+    });
+    buttonSprite.on('pointerdown', () => {
+      console.log('[UI] Button clicked!');
+    });
+
+    this.layerManager.uiLayer.addChild(buttonSprite);
   }
 
   /**
