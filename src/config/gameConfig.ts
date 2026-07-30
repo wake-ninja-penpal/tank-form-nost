@@ -1,76 +1,52 @@
-/**
- * Конфигурация игры "СТАЛЬНОЙ РУБЕЖ"
- * Единый источник истины для всех магических чисел, балансов и путей.
- */
-
 export const GAME_CONFIG = {
-  // Рендер
   render: {
     preference: 'webgl' as const,
     pixelArtScale: 1,
     spriteSize: 32,
   },
-  
-  // UI
   ui: {
     fontName: 'steelFont',
   },
-  
-  // Время (Fixed Timestep)
   time: {
-    fixedDelta: 1 / 60, // 16.6мс
-    maxAccumulator: 0.25, // Защита от спирали смерти
+    fixedDelta: 16.67,
+    maxAccumulator: 0.25,
   },
-  
-  // Аудио
+  physics: {
+    entitySize: 40,
+    playerSpeed: 0.15,
+    bulletSpeed: 12,
+    speedFactor: 1.0,
+  },
+  map: {
+    width: 13,
+    height: 13,
+    tileSize: 40,
+    baseX: 6,
+    baseY: 12,
+    grid: { width: 13, height: 13 },
+  },
+  waves: {
+    baseEnemyCount: 5,
+    difficultyMultiplier: 0.5,
+    baseSpawnInterval: 1000,
+    bossEveryNWaves: 5,
+  },
+  juice: {
+    shakeIntensity: 10,
+    shakeDuration: 300,
+    hitStopDuration: 50,
+  },
+  garage: {
+    tankPreviewScale: 2,
+  },
   audio: {
     poolSize: 16,
-    lowPassFrequency: 800, // Hz для режима "Боевой Транс"
-    masterVolume: 0.7,
+    masterVolume: 0.5,
+    lowPassFreq: 800,
+    lowPassFrequency: 800,
   },
-  
-  // Экран
   screen: {
     width: 800,
     height: 600,
   },
-  
-  // Гараж
-  garage: {
-    slotsCount: 7,
-    tankPreviewScale: 2,
-    virtualScrollItemHeight: 60,
-    visibleItemsCount: 5,
-  },
-  
-  // Пулы объектов
-  pools: {
-    bullets: 50,
-    particles: 100,
-    enemies: 20,
-    maxFloatingTexts: 20,
-  },
-  
-  // Сетка карты
-  grid: {
-    width: 13,
-    height: 13,
-    tileSize: 40,
-  },
-  
-  // Физика
-  physics: {
-    speedFactor: 1.0,
-    entitySize: 40, // Хитбокс 40x40 px
-  },
-  
-  // Карта
-  map: {
-    baseX: 6,
-    baseY: 12,
-    width: 13,
-    height: 13,
-  },
 } as const;
-
-export type GameConfig = typeof GAME_CONFIG;
