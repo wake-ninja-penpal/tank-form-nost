@@ -1,58 +1,111 @@
+import { EventEmitter } from 'pixi.js';
+import { GAME_CONFIG } from '../config/gameConfig';
+
+export enum WaveState {
+  IDLE = 'IDLE',
+  PREPARING = 'PREPARING',
+  ACTIVE = 'ACTIVE',
+  BOSS_FIGHT = 'BOSS_FIGHT'
+}
+
+export interface WaveData {
+  waveNumber: number;
+  enemyCount: number;
+  spawnInterval: number;
+  bossSpawn: boolean;
+}
+
 /**
- * Система волн врагов (Этап 5)
- * Управляет спавном, фазой подготовки и формулами сложности
+ * Система управления волнами врагов.
+ * Реализует логику подготовки, спавна и завершения волн.
  */
-export class WaveSystem {
-  private waveNumber: number = 0;
-  private enemiesToSpawn: number = 0;
-  private spawnTimer: number = 0;
-  private prepPhase: boolean = true;
-  private prepTimer: number = 0;
+export class WaveSystem extends EventEmitter {
+  private _currentWave: number = 0;
+  private _state: WaveState = WaveState.IDLE;
+  private _spawnTimer: number = 0;
+  private _enemiesSpawned: number = 0;
+  private _waveData: WaveData | null = null;
 
-  private readonly PREP_DURATION = 3000; // 3 сек подготовка
-  private readonly SPAWN_INTERVAL = 800; // 800 мс между спавнами
+  constructor() {
+    super();
+  }
 
-  public startWave(wave: number): void {
-    this.waveNumber = wave;
-    this.prepPhase = true;
-    this.prepTimer = this.PREP_DURATION;
+  public startNextWave(): void {
+    this._currentWave++;
+    this._state = WaveState.PREPARING;
+    this._waveData = this.calculateWave(this._currentWave);
+    this._enemiesSpawned = 0;
     
-    // Формула сложности: база + рост
-    this.enemiesToSpawn = 3 + Math.floor(wave * 1.5);
-  }
-
-  public fixedUpdate(delta: number): void {
-    if (this.prepPhase) {
-      this.prepTimer -= delta;
-      if (this.prepTimer <= 0) {
-        this.prepPhase = false;
-        this.spawnTimer = 0;
+    // Фаза подготовки (3 секунды) перед началом спавна
+    this.emit('wavePreparing', this._currentWave);
+    
+    setTimeout(() => {
+      if (this._state === WaveState.PREPARING) {
+        this._state = WaveState.ACTIVE;
+        this.emit('waveStarted', this._waveData);
       }
-      return;
+    }, 3000);
+  }
+
+  private calculateWave(num: number): WaveData {
+    const baseCount = GAME_CONFIG.waves.baseEnemyCount;
+    const multiplier = 1 + (num - 1) * GAME_CONFIG.waves.difficultyMultiplier;
+    
+    return {
+      waveNumber: num,
+      enemyCount: Math.floor(baseCount * multiplier),
+      spawnInterval: Math.max(500, GAME_CONFIG.waves.baseSpawnInterval - (num * 10)),
+      bossSpawn: num % GAME_CONFIG.waves.bossEveryNWaves === 0
+    };
+  }
+
+  public update(delta: number): void {
+    if (this._state !== WaveState.ACTIVE) return;
+
+    if (!this._waveData) return;
+
+    this._spawnTimer += delta;
+
+    if (this._spawnTimer >= this._waveData.spawnInterval && 
+        this._enemiesSpawned < this._waveData.enemyCount) {
+      
+      this._spawnTimer = 0;
+      this._enemiesSpawned++;
+      
+      // Событие для спавна одного врага
+      // Координаты спавна должны быть определены в MapGridSystem или переданы отдельно
+      this.emit('spawnEnemy', {
+        type: this._enemiesSpawned === this._waveData.enemyCount && this._waveData.bossSpawn ? 'boss' : 'basic',
+        wave: this._currentWave
+      });
     }
 
-    this.spawnTimer -= delta;
-    if (this.spawnTimer <= 0 && this.enemiesToSpawn > 0) {
-      this.spawnEnemy();
-      this.enemiesToSpawn--;
-      this.spawnTimer = this.SPAWN_INTERVAL;
+    if (this._enemiesSpawned >= this._waveData.enemyCount) {
+      // Проверка на окончание волны (все враги убиты) выносится наружу или слушается событие
+      // Здесь просто ждем сигнала извне, что волна завершена
     }
   }
 
-  private spawnEnemy(): void {
-    // Логика спавна через Factory (будет в Этапе 5)
-    console.log(`Spawning enemy for wave ${this.waveNumber}`);
+  public onWaveComplete(): void {
+    this._state = WaveState.IDLE;
+    this.emit('waveComplete', this._currentWave);
+    
+    // Автоматический старт следующей волны через паузу
+    setTimeout(() => {
+      this.startNextWave();
+    }, 5000);
   }
 
-  public isPrepPhase(): boolean {
-    return this.prepPhase;
+  public get currentWave(): number {
+    return this._currentWave;
   }
 
-  public getWaveNumber(): number {
-    return this.waveNumber;
+  public get state(): WaveState {
+    return this._state;
   }
-
+  
   public destroy(): void {
-    // Очистка ресурсов
+    this.removeAllListeners();
+    this._waveData = null;
   }
 }
