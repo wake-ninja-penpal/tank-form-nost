@@ -37,6 +37,19 @@ export const GAME_CONFIG = {
     bullets: 50,
     particles: 100,
     enemies: 20,
+    maxFloatingTexts: 20,
+  },
+  
+  // Сетка карты
+  grid: {
+    width: 13,
+    height: 13,
+    tileSize: 40,
+  },
+  
+  // Физика
+  physics: {
+    speedFactor: 1.0,
   },
 } as const;
 
