@@ -1,4 +1,3 @@
-import { GAME_CONFIG } from '../config/gameConfig';
 
 /**
  * Perk Types for Roguelike system

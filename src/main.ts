@@ -1,506 +1,362 @@
 import * as PIXI from 'pixi.js';
-import { LayerManager, IDisposable } from './core/LayerManager';
-import { TimeManager } from './core/TimeManager';
+import { LayerManager, LayerType } from './core/LayerManager';
+import { TimeManager, FIXED_DELTA_TIME } from './core/TimeManager';
 import { PauseSystem } from './systems/PauseSystem';
-import { SaveManager } from './core/SaveManager';
 import { ProceduralTextureFactory } from './core/ProceduralTextureFactory';
 import { MapGridSystem } from './systems/MapGridSystem';
-import { PhysicsSystem } from './systems/PhysicsSystem';
+import { PhysicsSystem, IPhysicsEntity } from './systems/PhysicsSystem';
 import { JuiceSystem } from './systems/JuiceSystem';
 import { PathfindingSystem } from './systems/PathfindingSystem';
-import { WaveSystem } from './entities/enemies/EnemyTypes';
+import { WaveSystem } from './systems/WaveSystem';
 import { GameOverSequence } from './systems/GameOverSequence';
 import { RoguePerkSystem } from './systems/RoguePerkSystem';
-import { GAME_CONFIG } from './config/gameConfig';
 import { UIButton } from './ui/components/UIButton';
+import { UIBitmapText } from './ui/components/UIBitmapText';
 import { VirtualScrollingContainer } from './ui/components/VirtualScrollingContainer';
 import { TankPreview } from './ui/garage/TankPreview';
+import { GAME_CONFIG } from './config/gameConfig';
 
-/**
- * Основной класс игры "СТАЛЬНОЙ РУБЕЖ"
- * Интегрирует все системы Этапа 1-2:
- * - PixiJS v8 с Retina и WebGL (Правило 1, 5)
- * - Слои рендера (Правило 2)
- * - Fixed Timestep физика (Правило 4)
- * - Авто-пауза (Правило 13)
- * - SaveManager (Правило 14)
- * - ProceduralTextureFactory (CanvasSource v8)
- */
-export class Game implements IDisposable {
-  public readonly app: PIXI.Application;
-  public readonly layerManager: LayerManager;
-  public readonly timeManager: TimeManager;
-  public readonly pauseSystem: PauseSystem;
-  public readonly saveManager: SaveManager;
-  public readonly mapGrid: MapGridSystem;
-  public readonly physics: PhysicsSystem;
-  public readonly juice: JuiceSystem;
-  public readonly pathfinding: PathfindingSystem;
-  public readonly waveSystem: WaveSystem;
-  public readonly gameOverSequence: GameOverSequence;
-  public readonly roguePerkSystem: RoguePerkSystem;
-  
-  // Garage UI components
-  private garageContainer: PIXI.Container | null = null;
-  private tankPreview: TankPreview | null = null;
-  private virtualScroll: VirtualScrollingContainer | null = null;
-  private isGarageMode: boolean = true;
+type GarageTab = 'ASSEMBLY' | 'HANGAR' | 'CRAFT' | 'BOXES';
 
-  private _lastFrameTime: number = 0;
-  private _isRunning: boolean = false;
-  private _boundOnResize: () => void;
+export class Game {
+  private layers!: LayerManager;
+  private time!: TimeManager;
+  private pause!: PauseSystem;
+
+  // Системы Этапа 4-5
+  private grid!: MapGridSystem;
+  private physics!: PhysicsSystem;
+  private juice!: JuiceSystem;
+  private _pathfinding!: PathfindingSystem;
+  private _waves!: WaveSystem;
+  private _gameOverSeq!: GameOverSequence;
+  private _perks!: RoguePerkSystem;
+
+  // UI Гаража
+  private garageContainer!: PIXI.Container;
+  private tabs: Record<GarageTab, PIXI.Container> = {} as any;
+  private tabButtons: Record<GarageTab, UIButton> = {} as any;
+
+  // Компоненты Гаража
+  private tankPreview!: TankPreview;
+  private hangarScroll!: VirtualScrollingContainer;
+  private battleButton!: UIButton;
+
+  // Сущности боя
+  private playerEntity!: IPhysicsEntity;
+  private playerSprite!: PIXI.Sprite;
+  private enemyEntities: IPhysicsEntity[] = [];
+  private enemySprites: PIXI.Sprite[] = [];
+  private isBattleMode: boolean = false;
+
+  // Ввод
+  private keys: Record<string, boolean> = {};
 
   constructor() {
-    this.app = new PIXI.Application();
-    this.layerManager = new LayerManager();
-    this.timeManager = new TimeManager();
-    this.pauseSystem = new PauseSystem();
-    this.saveManager = new SaveManager();
-    this.mapGrid = new MapGridSystem();
-    this.physics = new PhysicsSystem(this.mapGrid);
-    this.juice = new JuiceSystem(this.app);
-    this.pathfinding = new PathfindingSystem(13, 13);
-    this.waveSystem = new WaveSystem();
-    this.gameOverSequence = new GameOverSequence();
-    this.roguePerkSystem = new RoguePerkSystem();
-
-    // Настройка связей между системами
-    this.pathfinding.setMapGrid(this.mapGrid);
-    this.gameOverSequence.setLayerManager(this.layerManager);
-
-    // Сохраняем ссылку на бинд для корректного removeEventListener (Правило 11: Zero-Allocation)
-    this._boundOnResize = this.onResize.bind(this);
-
-    // Настройка callback паузы
-    this.pauseSystem.onPauseCallback = this.onPauseChanged.bind(this);
-
-    // Настройка фиксированного обновления физики
-    this.timeManager.onFixedUpdate = this.fixedUpdate.bind(this);
+    this.pause = new PauseSystem();
+    this.setupInput();
   }
 
-  /**
-   * Инициализация игры
-   */
   public async init(): Promise<void> {
-    const width = window.innerWidth;
-    const height = window.innerHeight;
+    this.layers = new LayerManager();
+    await ProceduralTextureFactory.init();
 
-    // 1. Инициализация процедурных текстур (CanvasSource v8)
-    ProceduralTextureFactory.init();
+    // Инициализация систем
+    this.grid = new MapGridSystem();
+    this.physics = new PhysicsSystem(this.grid);
+    this.juice = new JuiceSystem();
+    this._pathfinding = new PathfindingSystem(this.grid);
+    this._waves = new WaveSystem();
+    this._gameOverSeq = new GameOverSequence(this.juice, this.layers.root);
+    this._perks = new RoguePerkSystem();
 
-    // 2. Создание PixiJS приложения с Retina и WebGL
-    await this.app.init({
-      width,
-      height,
-      backgroundColor: 0x0a0a0a,
-      preference: 'webgl',
-      resolution: window.devicePixelRatio || 1,
-      autoDensity: true,
-      antialias: false, // Отключаем сглаживание для пиксель-арта
-    });
-
-    // 3. Добавление canvas в DOM
-    const container = document.getElementById('app');
-    if (container) {
-      container.appendChild(this.app.canvas as HTMLCanvasElement);
-    } else {
-      console.error('[Game] Container #app not found!');
-    }
-
-    // 4. Добавление корневого контейнера слоёв на сцену
-    this.app.stage.addChild(this.layerManager.root);
-
-    // 5. Добавление тестовых спрайтов для проверки рендера
-    this.addTestSprites();
-
-    // 6. Настройка обработки изменения размера окна (Правило 11: Zero-Allocation)
-    window.addEventListener('resize', this._boundOnResize, { passive: true });
-
-    console.log('[Game] Initialized with PixiJS v8, Retina DPI, WebGL, Procedural Textures');
-    console.log(`[Game] Canvas size: ${width}x${height}, DPI: ${window.devicePixelRatio}`);
-  }
-
-  /**
-   * Добавление тестовых спрайтов на слои для проверки рендера
-   */
-  private addTestSprites(): void {
-    // Создаем UI Гаража
+    // Построение UI Гаража
     this.createGarageUI();
+
+    // Создание игрока (скрыт в гараже)
+    this.createPlayer();
+
+    // Запуск циклов - используем onFixedUpdate callback
+    this.time = new TimeManager();
+    this.time.onFixedUpdate = (fixedDelta: number) => this.fixedUpdate(fixedDelta);
+
+    console.log('✅ СТАЛЬНОЙ РУБЕЖ запущен. Режим: ГАРАЖ');
     
-    // Спрайт земли на GroundLayer
-    const groundTexture = ProceduralTextureFactory.getTexture('ground');
-    const groundSprite = new PIXI.Sprite(groundTexture);
-    groundSprite.x = 100;
-    groundSprite.y = 100;
-    groundSprite.scale.set(3);
-    this.layerManager.groundLayer.addChild(groundSprite);
-
-    // Спрайт стены на WallLayer
-    const wallTexture = ProceduralTextureFactory.getTexture('wall');
-    const wallSprite = new PIXI.Sprite(wallTexture);
-    wallSprite.x = 200;
-    wallSprite.y = 200;
-    wallSprite.scale.set(3);
-    this.layerManager.wallLayer.addChild(wallSprite);
-
-    // Создаем тестовый танк с физикой
-    this.createTestTank();
-
-    console.log('[Game] Test sprites and Garage UI added to layers');
+    // Запускаем render loop через requestAnimationFrame
+    this.startRenderLoop();
   }
 
-  /**
-   * Создание UI Гаража с вкладками
-   */
+  private startRenderLoop(): void {
+    const loop = () => {
+      const deltaMS = 16.67; // approx 60fps
+      this.update(deltaMS);
+      requestAnimationFrame(loop);
+    };
+    requestAnimationFrame(loop);
+  }
+
   private createGarageUI(): void {
     this.garageContainer = new PIXI.Container();
-    
+    this.layers.uiLayer.addChild(this.garageContainer);
+
     // Фон гаража
-    const bgGraphics = new PIXI.Graphics();
-    bgGraphics.rect(0, 0, GAME_CONFIG.screen.width, GAME_CONFIG.screen.height);
-    bgGraphics.fill(0x1a1a2e);
-    this.garageContainer.addChild(bgGraphics);
+    const bg = new PIXI.Graphics();
+    bg.rect(0, 0, GAME_CONFIG.screen.width, GAME_CONFIG.screen.height);
+    bg.fill(0x2c3e50);
+    this.garageContainer.addChild(bg);
 
     // Заголовок
-    const titleText = new PIXI.BitmapText('СТАЛЬНОЙ РУБЕЖ - ГАРАЖ', {
-      fontFamily: 'PressStart2P',
-      fontSize: 24,
-      fill: 0xffd700,
+    const title = new UIBitmapText('СТАЛЬНОЙ РУБЕЖ - ГАРАЖ', { fontSize: 32 });
+    title.x = GAME_CONFIG.screen.width / 2 - title.width / 2;
+    title.y = 20;
+    this.garageContainer.addChild(title);
+
+    // Панель вкладок
+    const tabY = 80;
+    const tabHeight = 40;
+    const tabWidth = 100;
+    const startX = 20;
+
+    const tabLabels: Record<GarageTab, string> = {
+      'ASSEMBLY': 'СБОРКА',
+      'HANGAR': 'АНГАР',
+      'CRAFT': 'КРАФТ',
+      'BOXES': 'БОКСЫ'
+    };
+
+    let currentX = startX;
+    (Object.keys(tabLabels) as GarageTab[]).forEach((tabKey) => {
+      const btn = new UIButton(tabLabels[tabKey], tabWidth, tabHeight);
+      btn.x = currentX;
+      btn.y = tabY;
+      btn.onClick(() => this.switchTab(tabKey));
+      this.tabButtons[tabKey] = btn;
+      this.garageContainer.addChild(btn);
+      currentX += tabWidth + 10;
     });
-    titleText.x = GAME_CONFIG.screen.width / 2 - titleText.width / 2;
-    titleText.y = 20;
-    this.garageContainer.addChild(titleText);
 
-    // Вкладки
-    const tabs = ['СБОРКА', 'АНГАР', 'КРАФТ', 'БОКСЫ'];
-    let tabX = 50;
-    for (let i = 0; i < tabs.length; i++) {
-      const tabBtn = new UIButton(tabs[i], 16);
-      tabBtn.x = tabX;
-      tabBtn.y = 70;
-      tabBtn.on('pointerdown', () => {
-        this.switchTab(tabs[i]);
-      });
-      this.garageContainer.addChild(tabBtn as unknown as PIXI.Container);
-      tabX += 180;
-    }
+    // Контейнер контента вкладок
+    const contentY = 140;
 
-    // TankPreview на вкладке СБОРКА
+    // 1. Вкладка СБОРКА
+    this.tabs.ASSEMBLY = new PIXI.Container();
     this.tankPreview = new TankPreview();
     this.tankPreview.x = GAME_CONFIG.screen.width / 2;
-    this.tankPreview.y = 300;
+    this.tankPreview.y = contentY + 150;
     this.tankPreview.setHover(true);
-    this.garageContainer.addChild(this.tankPreview as unknown as PIXI.Container);
+    this.tabs.ASSEMBLY.addChild(this.tankPreview);
 
-    // Авто-обновление слотов для демонстрации
-    setTimeout(() => {
-      if (this.tankPreview) {
-        this.tankPreview.updateSlot('chassis', 'tank_chassis');
-        console.log('[Garage] Chassis slot updated');
-      }
-    }, 1000);
-    setTimeout(() => {
-      if (this.tankPreview) {
-        this.tankPreview.updateSlot('turret', 'tank_turret');
-        console.log('[Garage] Turret slot updated');
-      }
-    }, 2000);
-    setTimeout(() => {
-      if (this.tankPreview) {
-        this.tankPreview.updateSlot('weapon', 'tank_weapon');
-        console.log('[Garage] Weapon slot updated');
-      }
-    }, 3000);
+    // Подписи слотов
+    const slotLabels = ['Шасси', 'Турель', 'Орудие', 'Двигатель', 'Броня', 'Модуль', 'Декор'];
+    slotLabels.forEach((label, i) => {
+      const text = new UIBitmapText(label, { fontSize: 14 });
+      text.x = GAME_CONFIG.screen.width / 2 - 150;
+      text.y = contentY + 50 + (i * 25);
+      this.tabs.ASSEMBLY.addChild(text);
+    });
 
-    // VirtualScrollingContainer на вкладке АНГАР (скрыт по умолчанию)
-    this.virtualScroll = new VirtualScrollingContainer(400, 300);
-    this.virtualScroll.x = GAME_CONFIG.screen.width / 2 - 200;
-    this.virtualScroll.y = 150;
-    this.virtualScroll.visible = false;
-    
-    // Заполняем 100 элементами
-    const items: PIXI.Container[] = [];
+    // 2. Вкладка АНГАР
+    this.tabs.HANGAR = new PIXI.Container();
+    this.hangarScroll = new VirtualScrollingContainer(40, 8, 300, 320);
+    this.hangarScroll.x = GAME_CONFIG.screen.width / 2 - 150;
+    this.hangarScroll.y = contentY;
+
+    const hangarData = [];
     for (let i = 0; i < 100; i++) {
-      const item = new PIXI.Graphics();
-      item.rect(0, 0, 380, 50);
-      item.fill(0x333355);
-      item.stroke({ width: 1, color: 0x666688 });
-      items.push(item as unknown as PIXI.Container);
+      hangarData.push({ id: `tank_${i}`, data: { model: `Mk-${i + 1}`, rank: i % 5 + 1 } });
     }
-    this.virtualScroll.setItems(items);
-    
-    this.garageContainer.addChild(this.virtualScroll as unknown as PIXI.Container);
+    this.hangarScroll.setItems(hangarData);
+    this.tabs.HANGAR.addChild(this.hangarScroll);
 
-    // Кнопка переключения режима
-    const modeBtn = new UIButton('В БОЙ >>>', 18);
-    modeBtn.x = GAME_CONFIG.screen.width - 200;
-    modeBtn.y = GAME_CONFIG.screen.height - 80;
-    modeBtn.on('pointerdown', () => {
-      this.toggleGameMode();
-    });
-    this.garageContainer.addChild(modeBtn as unknown as PIXI.Container);
+    // 3. Вкладка КРАФТ
+    this.tabs.CRAFT = new PIXI.Container();
+    const craftText = new UIBitmapText('В РАЗРАБОТКЕ', { fontSize: 24 });
+    craftText.x = 150;
+    craftText.y = 150;
+    this.tabs.CRAFT.addChild(craftText);
 
-    this.layerManager.uiLayer.addChild(this.garageContainer);
-    console.log('[Garage] UI created with tabs, TankPreview, and VirtualScroll');
-  }
-
-  /**
-   * Переключение вкладки гаража
-   */
-  private switchTab(tabName: string): void {
-    console.log(`[Garage] Switched to tab: ${tabName}`);
-    
-    if (this.tankPreview) {
-      this.tankPreview.visible = (tabName === 'сборка');
-    }
-    if (this.virtualScroll) {
-      this.virtualScroll.visible = (tabName === 'ангар');
-    }
-  }
-
-  /**
-   * Переключение режима Гараж/Бой
-   */
-  private toggleGameMode(): void {
-    this.isGarageMode = !this.isGarageMode;
-    if (this.garageContainer) {
-      this.garageContainer.visible = this.isGarageMode;
-    }
-    console.log(`[Game] Mode switched: ${this.isGarageMode ? 'GARAGE' : 'BATTLE'}`);
-  }
-
-  /**
-   * Добавление тестовой кнопки UI
-   */
-  private addTestUIButton(): void {
-    // Создаем простую кнопку из графики для теста UI слоя
-    const buttonGraphics = new PIXI.Graphics();
-    buttonGraphics.rect(0, 0, 150, 50);
-    buttonGraphics.fill(0x4a90d9);
-    buttonGraphics.stroke({ width: 2, color: 0xffffff });
-    
-    // Генерируем текстуру из графики (PixiJS v8 API)
-    const buttonTexture = this.app.renderer.generateTexture(buttonGraphics);
-    buttonGraphics.destroy();
-
-    const buttonSprite = new PIXI.Sprite(buttonTexture);
-    buttonSprite.x = 50;
-    buttonSprite.y = 50;
-    buttonSprite.eventMode = 'static';
-    buttonSprite.cursor = 'pointer';
-
-    // Обработчики событий
-    buttonSprite.on('pointerover', () => {
-      buttonSprite.alpha = 0.8;
-    });
-    buttonSprite.on('pointerout', () => {
-      buttonSprite.alpha = 1.0;
-    });
-    buttonSprite.on('pointerdown', () => {
-      console.log('[UI] Button clicked!');
-      // Тест Juice системы при клике
+    // 4. Вкладка БОКСЫ
+    this.tabs.BOXES = new PIXI.Container();
+    const testBtn = new UIButton('ТЕСТ ЭФФЕКТОВ', 200, 50);
+    testBtn.x = 150;
+    testBtn.y = 150;
+    testBtn.onClick(() => {
       this.juice.startShake(10);
-      this.juice.triggerHitStop(30);
+      this.juice.showFloatingText('CRITICAL!', GAME_CONFIG.screen.width / 2, GAME_CONFIG.screen.height / 2);
+    });
+    this.tabs.BOXES.addChild(testBtn);
+
+    Object.values(this.tabs).forEach(tab => {
+      tab.y = contentY;
+      tab.visible = false;
+      this.garageContainer.addChild(tab);
     });
 
-    this.layerManager.uiLayer.addChild(buttonSprite);
+    this.switchTab('ASSEMBLY');
+
+    // Кнопка "В БОЙ"
+    this.battleButton = new UIButton('В БОЙ >>>', 150, 40);
+    this.battleButton.x = GAME_CONFIG.screen.width - 170;
+    this.battleButton.y = GAME_CONFIG.screen.height - 60;
+    this.battleButton.onClick(() => this.toggleBattleMode());
+    this.garageContainer.addChild(this.battleButton);
   }
 
-  /**
-   * Создание тестового танка с физикой
-   */
-  private createTestTank(): void {
-    const tankTexture = ProceduralTextureFactory.getTexture('tank_body');
-    const tankSprite = new PIXI.Sprite(tankTexture);
-    tankSprite.scale.set(3);
-    
-    // Танк 32x32 * 3 = 96px, но хитбокс 40x40
-    tankSprite.x = 100;
-    tankSprite.y = 100;
-    
-    this.layerManager.tankLayer.addChild(tankSprite);
+  private switchTab(tab: GarageTab): void {
+    (Object.keys(this.tabs) as GarageTab[]).forEach(key => {
+      this.tabs[key].visible = (key === tab);
+    });
 
-    // Добавляем физику танку
-    const tankPhysics = {
-      x: 100,
-      y: 100,
-      vx: 100, // пикселей в секунду
-      vy: 50,
-      width: GAME_CONFIG.physics.entitySize, // 40px
-      height: GAME_CONFIG.physics.entitySize, // 40px
-      faction: 1, // PLAYER
+    if (tab === 'ASSEMBLY') {
+      this.tankPreview.setHover(true);
+      setTimeout(() => this.tankPreview.updateSlot('turret', 'tank_turret'), 500);
+      setTimeout(() => this.tankPreview.updateSlot('gun', 'tank_gun'), 1000);
+    } else if (tab === 'HANGAR') {
+      this.hangarScroll.scrollBy(99999);
+      this.hangarScroll.scrollBy(-99999);
+    }
+  }
+
+  private createPlayer(): void {
+    this.playerSprite = new PIXI.Sprite(ProceduralTextureFactory.getTexture('tank_player'));
+    this.playerSprite.anchor.set(0.5);
+    this.playerSprite.x = 260;
+    this.playerSprite.y = 260;
+    this.playerSprite.visible = false;
+    this.layers.tankLayer.addChild(this.playerSprite);
+
+    this.playerEntity = {
+      x: 260,
+      y: 260,
+      vx: 0,
+      vy: 0,
+      width: GAME_CONFIG.physics.entitySize,
+      height: GAME_CONFIG.physics.entitySize,
+      faction: 1,
       isSolid: true,
-      sprite: tankSprite,
-      onCollide: undefined,
     };
-
-    this.physics.addEntity(tankPhysics as any);
-
-    // Простое обновление позиции танка каждый кадр
-    const updateTank = () => {
-      if (!this.pauseSystem.isPaused) {
-        tankSprite.x = tankPhysics.x;
-        tankSprite.y = tankPhysics.y;
-        
-        // Отскок от стен для демонстрации физики
-        if (tankPhysics.x <= 0 || tankPhysics.x >= 520 - 40) {
-          tankPhysics.vx *= -1;
-        }
-        if (tankPhysics.y <= 0 || tankPhysics.y >= 520 - 40) {
-          tankPhysics.vy *= -1;
-        }
-      }
-      requestAnimationFrame(updateTank);
-    };
-    updateTank();
+    this.physics.addEntity(this.playerEntity);
   }
 
-  /**
-   * Запуск игрового цикла
-   */
-  public start(): void {
-    if (this._isRunning) {
-      return;
-    }
-
-    this._isRunning = true;
-    this._lastFrameTime = performance.now();
-    
-    // Подписка на тикер PixiJS
-    this.app.ticker.add(this.gameLoop, this);
-
-    console.log('[Game] Started');
+  private setupInput(): void {
+    window.addEventListener('keydown', (e) => {
+      this.keys[e.code] = true;
+      if (e.code === 'KeyG') this.toggleBattleMode();
+      if (e.code === 'Space' && this.isBattleMode) this.shoot();
+    });
+    window.addEventListener('keyup', (e) => {
+      this.keys[e.code] = false;
+    });
   }
 
-  /**
-   * Остановка игрового цикла
-   */
-  public stop(): void {
-    if (!this._isRunning) {
-      return;
-    }
+  private toggleBattleMode(): void {
+    this.isBattleMode = !this.isBattleMode;
 
-    this._isRunning = false;
-    this.app.ticker.remove(this.gameLoop, this);
-
-    console.log('[Game] Stopped');
-  }
-
-  /**
-   * Основной игровой цикл (вызывается каждый кадр рендера)
-   * Zero-Allocation: нет аллокаций внутри (Правило 11)
-   */
-  private gameLoop = (): void => {
-    const currentTime = performance.now();
-    const deltaTimeMs = currentTime - this._lastFrameTime;
-    this._lastFrameTime = currentTime;
-
-    // Конвертация в секунды
-    const deltaSeconds = deltaTimeMs / 1000;
-
-    // Обновление менеджера времени (с фиксированным шагом внутри)
-    this.timeManager.update(deltaSeconds);
-
-    // Обновление Juice системы (рендер эффектов, тряска, частицы)
-    this.juice.update(this.app.ticker.deltaMS);
-  };
-
-  /**
-   * Фиксированное обновление физики (вызывается TimeManager с шагом 16.6 мс)
-   * Правило 4: Fixed Timestep 60 Hz
-   * Правило 11: Zero-Allocation
-   */
-  private fixedUpdate(_fixedDelta: number): void {
-    // Вызов физики
-    this.physics.fixedUpdate(_fixedDelta);
-    
-    // Проверка разрушения базы
-    const baseCell = this.mapGrid.getBaseCell();
-    if (baseCell && baseCell.type === 0) {
-      // База разрушена - Game Over
-      console.log('[Game] BASE DESTROYED! Game Over');
-      this.juice.startShake(20);
-      this.juice.triggerHitStop(50);
-    }
-  }
-
-  /**
-   * Обработчик изменения состояния паузы
-   */
-  private onPauseChanged(paused: boolean): void {
-    this.timeManager.setPaused(paused);
-    
-    if (paused) {
-      console.log('[Game] Paused (auto)');
+    if (this.isBattleMode) {
+      this.garageContainer.visible = false;
+      this.playerSprite.visible = true;
+      this.battleButton.setText('<<< В ГАРАЖ');
+      this.spawnTestEnemies();
+      console.log('⚔️ РЕЖИМ БОЯ');
     } else {
-      console.log('[Game] Resumed');
-      // Сброс lastFrameTime чтобы избежать скачка дельты
-      this._lastFrameTime = performance.now();
+      this.garageContainer.visible = true;
+      this.playerSprite.visible = false;
+      this.battleButton.setText('В БОЙ >>>');
+      
+      this.enemySprites.forEach(s => s.destroy());
+      this.enemySprites = [];
+      this.enemyEntities.forEach(e => this.physics.removeEntity(e));
+      this.enemyEntities = [];
+      
+      console.log('🔧 РЕЖИМ ГАРАЖА');
     }
   }
 
-  /**
-   * Обработка изменения размера окна
-   */
-  private onResize(): void {
-    const width = window.innerWidth;
-    const height = window.innerHeight;
+  private spawnTestEnemies(): void {
+    for (let i = 0; i < 3; i++) {
+      const sprite = new PIXI.Sprite(ProceduralTextureFactory.getTexture('tank_enemy'));
+      sprite.anchor.set(0.5);
+      sprite.x = 100 + i * 150;
+      sprite.y = 100;
+      sprite.visible = true;
+      this.layers.tankLayer.addChild(sprite);
+      this.enemySprites.push(sprite);
 
-    this.app.renderer.resize(width, height);
-    
-    // Центрирование камеры или адаптация UI может быть добавлена здесь
-    console.log(`[Game] Resized to ${width}x${height}`);
+      const entity: IPhysicsEntity = {
+        x: 100 + i * 150,
+        y: 100,
+        vx: 0,
+        vy: 0,
+        width: GAME_CONFIG.physics.entitySize,
+        height: GAME_CONFIG.physics.entitySize,
+        faction: 2,
+        isSolid: true,
+      };
+      this.physics.addEntity(entity);
+      this.enemyEntities.push(entity);
+    }
   }
 
-  /**
-   * Правило 13: Dispose Pattern — полная очистка ресурсов
-   */
+  private shoot(): void {
+    const bullet = new PIXI.Sprite(ProceduralTextureFactory.getTexture('bullet'));
+    bullet.anchor.set(0.5);
+    bullet.x = this.playerEntity.x;
+    bullet.y = this.playerEntity.y - 20;
+    this.layers.bulletLayer.addChild(bullet);
+    
+    this.juice.startShake(5);
+    this.juice.showFloatingText('BANG!', this.playerEntity.x, this.playerEntity.y - 30);
+    
+    setTimeout(() => bullet.destroy(), 1000);
+  }
+
+  private update(deltaMS: number): void {
+    // Обновляем TimeManager
+    this.time.update(deltaMS);
+
+    if (!this.isBattleMode) {
+      const timeMs = performance.now();
+      this.tankPreview.updateUITime(FIXED_DELTA_TIME, timeMs);
+      this.hangarScroll.update(FIXED_DELTA_TIME);
+    }
+    
+    // Обновляем Juice систему
+    this.juice.update(deltaMS);
+  }
+
+  private fixedUpdate(fixedDelta: number): void {
+    if (!this.isBattleMode) return;
+
+    const speed = 200 * fixedDelta;
+    let dx = 0;
+    let dy = 0;
+
+    if (this.keys['ArrowUp'] || this.keys['KeyW']) dy = -speed;
+    if (this.keys['ArrowDown'] || this.keys['KeyS']) dy = speed;
+    if (this.keys['ArrowLeft'] || this.keys['KeyA']) dx = -speed;
+    if (this.keys['ArrowRight'] || this.keys['KeyD']) dx = speed;
+
+    this.playerEntity.vx = dx / fixedDelta;
+    this.playerEntity.vy = dy / fixedDelta;
+
+    this.enemyEntities.forEach((enemy, i) => {
+      const target = { x: 480, y: 480 };
+      const angle = Math.atan2(target.y - enemy.y, target.x - enemy.x);
+      enemy.vx = Math.cos(angle) * 100;
+      enemy.vy = Math.sin(angle) * 100;
+      
+      this.enemySprites[i].x = enemy.x;
+      this.enemySprites[i].y = enemy.y;
+    });
+
+    this.physics.fixedUpdate(fixedDelta);
+
+    this.playerSprite.x = this.playerEntity.x;
+    this.playerSprite.y = this.playerEntity.y;
+  }
+
   public dispose(): void {
-    this.stop();
-    
-    // Отписка от событий resize (Правило 11: Zero-Allocation)
-    window.removeEventListener('resize', this._boundOnResize);
-
-    // Dispose систем
-    this.pauseSystem.dispose();
-    this.timeManager.dispose();
-    this.saveManager.dispose();
-    this.layerManager.dispose();
-    this.mapGrid.destroy();
-    this.physics.destroy();
-    this.juice.destroy();
-
-    // Удаление canvas из DOM
-    if (this.app.canvas.parentNode) {
-      this.app.canvas.parentNode.removeChild(this.app.canvas);
-    }
-
-    // Уничтожение PixiJS приложения
-    this.app.destroy(true);
-
-    console.log('[Game] Disposed');
+    this.pause.dispose();
+    this.time.dispose();
   }
-}
-
-// Точка входа для запуска игры
-async function main(): Promise<void> {
-  const game = new Game();
-  
-  try {
-    await game.init();
-    game.start();
-    
-    // Сохраняем ссылку на game для отладки в консоли
-    (window as unknown as Record<string, unknown>)['game'] = game;
-    
-  } catch (error) {
-    console.error('[Game] Failed to initialize:', error);
-  }
-}
-
-// Запуск после загрузки DOM
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', main);
-} else {
-  main();
 }
