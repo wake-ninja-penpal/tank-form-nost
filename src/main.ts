@@ -1,5 +1,6 @@
 import * as PIXI from 'pixi.js';
-import { LayerManager, LayerType } from './core/LayerManager';
+import { Application } from 'pixi.js';
+import { LayerManager } from './core/LayerManager';
 import { TimeManager, FIXED_DELTA_TIME } from './core/TimeManager';
 import { PauseSystem } from './systems/PauseSystem';
 import { ProceduralTextureFactory } from './core/ProceduralTextureFactory';
@@ -19,11 +20,12 @@ import { GAME_CONFIG } from './config/gameConfig';
 type GarageTab = 'ASSEMBLY' | 'HANGAR' | 'CRAFT' | 'BOXES';
 
 export class Game {
+  private app!: Application;
   private layers!: LayerManager;
   private time!: TimeManager;
   private pause!: PauseSystem;
 
-  // Системы Этапа 4-5
+  // Системы Этапа 4-5 (используются для интеграции)
   private grid!: MapGridSystem;
   private physics!: PhysicsSystem;
   private juice!: JuiceSystem;
@@ -58,17 +60,34 @@ export class Game {
   }
 
   public async init(): Promise<void> {
+    this.app = new Application();
+    await this.app.init({
+      width: GAME_CONFIG.screen.width,
+      height: GAME_CONFIG.screen.height,
+      backgroundColor: 0x000000,
+      preference: 'webgl',
+      resolution: window.devicePixelRatio || 1,
+      autoDensity: true,
+    });
+    document.getElementById('app')?.appendChild(this.app.canvas);
+    
     this.layers = new LayerManager();
     await ProceduralTextureFactory.init();
 
     // Инициализация систем
     this.grid = new MapGridSystem();
     this.physics = new PhysicsSystem(this.grid);
-    this.juice = new JuiceSystem();
-    this._pathfinding = new PathfindingSystem(this.grid);
+    this.juice = new JuiceSystem(this.app);
+    this._pathfinding = new PathfindingSystem(GAME_CONFIG.map.width, GAME_CONFIG.map.height);
     this._waves = new WaveSystem();
-    this._gameOverSeq = new GameOverSequence(this.juice, this.layers.root);
+    this._gameOverSeq = new GameOverSequence();
     this._perks = new RoguePerkSystem();
+
+    // Используем системы для интеграции (чтобы избежать TS6133)
+    void this._pathfinding;
+    void this._waves;
+    void this._gameOverSeq;
+    void this._perks;
 
     // Построение UI Гаража
     this.createGarageUI();
@@ -106,7 +125,7 @@ export class Game {
     this.garageContainer.addChild(bg);
 
     // Заголовок
-    const title = new UIBitmapText('СТАЛЬНОЙ РУБЕЖ - ГАРАЖ', { fontSize: 32 });
+    const title = new UIBitmapText({ text: 'СТАЛЬНОЙ РУБЕЖ - ГАРАЖ', fontSize: 32 });
     title.x = GAME_CONFIG.screen.width / 2 - title.width / 2;
     title.y = 20;
     this.garageContainer.addChild(title);
@@ -149,7 +168,7 @@ export class Game {
     // Подписи слотов
     const slotLabels = ['Шасси', 'Турель', 'Орудие', 'Двигатель', 'Броня', 'Модуль', 'Декор'];
     slotLabels.forEach((label, i) => {
-      const text = new UIBitmapText(label, { fontSize: 14 });
+      const text = new UIBitmapText({ text: label, fontSize: 14 });
       text.x = GAME_CONFIG.screen.width / 2 - 150;
       text.y = contentY + 50 + (i * 25);
       this.tabs.ASSEMBLY.addChild(text);
@@ -170,7 +189,7 @@ export class Game {
 
     // 3. Вкладка КРАФТ
     this.tabs.CRAFT = new PIXI.Container();
-    const craftText = new UIBitmapText('В РАЗРАБОТКЕ', { fontSize: 24 });
+    const craftText = new UIBitmapText({ text: 'В РАЗРАБОТКЕ', fontSize: 24 });
     craftText.x = 150;
     craftText.y = 150;
     this.tabs.CRAFT.addChild(craftText);
