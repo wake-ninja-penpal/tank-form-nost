@@ -50,6 +50,7 @@ export const GAME_CONFIG = {
   // Физика
   physics: {
     speedFactor: 1.0,
+    entitySize: 40, // Хитбокс 40x40 px
   },
 } as const;
 

@@ -7,6 +7,7 @@ import { ProceduralTextureFactory } from './core/ProceduralTextureFactory';
 import { MapGridSystem } from './systems/MapGridSystem';
 import { PhysicsSystem } from './systems/PhysicsSystem';
 import { JuiceSystem } from './systems/JuiceSystem';
+import { GAME_CONFIG } from './config/gameConfig';
 
 /**
  * Основной класс игры "СТАЛЬНОЙ РУБЕЖ"
@@ -114,16 +115,11 @@ export class Game implements IDisposable {
     wallSprite.scale.set(3);
     this.layerManager.wallLayer.addChild(wallSprite);
 
-    // Спрайт танка на TankLayer
-    const tankTexture = ProceduralTextureFactory.getTexture('tank_body');
-    const tankSprite = new PIXI.Sprite(tankTexture);
-    tankSprite.x = 400;
-    tankSprite.y = 300;
-    tankSprite.scale.set(3);
-    this.layerManager.tankLayer.addChild(tankSprite);
-
     // Тестовая кнопка на UILayer
     this.addTestUIButton();
+
+    // Создаем тестовый танк с физикой
+    this.createTestTank();
 
     console.log('[Game] Test sprites added to layers');
   }
@@ -157,9 +153,61 @@ export class Game implements IDisposable {
     });
     buttonSprite.on('pointerdown', () => {
       console.log('[UI] Button clicked!');
+      // Тест Juice системы при клике
+      this.juice.startShake(10);
+      this.juice.triggerHitStop(30);
     });
 
     this.layerManager.uiLayer.addChild(buttonSprite);
+  }
+
+  /**
+   * Создание тестового танка с физикой
+   */
+  private createTestTank(): void {
+    const tankTexture = ProceduralTextureFactory.getTexture('tank_body');
+    const tankSprite = new PIXI.Sprite(tankTexture);
+    tankSprite.scale.set(3);
+    
+    // Танк 32x32 * 3 = 96px, но хитбокс 40x40
+    tankSprite.x = 100;
+    tankSprite.y = 100;
+    
+    this.layerManager.tankLayer.addChild(tankSprite);
+
+    // Добавляем физику танку
+    const tankPhysics = {
+      x: 100,
+      y: 100,
+      vx: 100, // пикселей в секунду
+      vy: 50,
+      width: GAME_CONFIG.physics.entitySize, // 40px
+      height: GAME_CONFIG.physics.entitySize, // 40px
+      faction: 1, // PLAYER
+      isSolid: true,
+      sprite: tankSprite,
+      onCollide: undefined,
+    };
+
+    this.physics.addEntity(tankPhysics as any);
+
+    // Простое обновление позиции танка каждый кадр
+    const updateTank = () => {
+      if (!this.pauseSystem.isPaused) {
+        tankSprite.x = tankPhysics.x;
+        tankSprite.y = tankPhysics.y;
+        
+        // Отскок от стен для демонстрации физики
+        if (tankPhysics.x <= 0 || tankPhysics.x >= 520 - 40) {
+          tankPhysics.vx *= -1;
+        }
+        if (tankPhysics.y <= 0 || tankPhysics.y >= 520 - 40) {
+          tankPhysics.vy *= -1;
+        }
+      }
+      requestAnimationFrame(updateTank);
+    };
+    updateTank();
   }
 
   /**
