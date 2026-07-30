@@ -72,8 +72,10 @@ export class TankPreview extends PIXI.Container {
   /**
    * Update на основе UITime (плавные анимации интерфейса).
    * Zero-Allocation: никаких new объектов.
+   * @param delta - время в секундах с последнего кадра
+   * @param timeMs - текущее время в миллисекундах (из TimeManager)
    */
-  public updateUITime(delta: number): void {
+  public updateUITime(delta: number, timeMs: number): void {
     // Плавное движение к целевой позиции (LERP)
     const lerpSpeed = 5 * delta;
     
@@ -81,7 +83,7 @@ export class TankPreview extends PIXI.Container {
     this.rotationAngle += (this.targetRotationAngle - this.rotationAngle) * lerpSpeed;
     
     this.baseSprite.x = this.hoverOffsetX;
-    this.baseSprite.rotation = this.rotationAngle * Math.sin(Date.now() / 500);
+    this.baseSprite.rotation = this.rotationAngle * Math.sin(timeMs / 500);
     
     // Обновление всех слотов
     this.slots.forEach((slot) => {
