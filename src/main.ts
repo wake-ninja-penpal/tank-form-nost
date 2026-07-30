@@ -7,7 +7,14 @@ import { ProceduralTextureFactory } from './core/ProceduralTextureFactory';
 import { MapGridSystem } from './systems/MapGridSystem';
 import { PhysicsSystem } from './systems/PhysicsSystem';
 import { JuiceSystem } from './systems/JuiceSystem';
+import { PathfindingSystem } from './systems/PathfindingSystem';
+import { WaveSystem } from './entities/enemies/EnemyTypes';
+import { GameOverSequence } from './systems/GameOverSequence';
+import { RoguePerkSystem } from './systems/RoguePerkSystem';
 import { GAME_CONFIG } from './config/gameConfig';
+import { UIButton } from './ui/components/UIButton';
+import { VirtualScrollingContainer } from './ui/components/VirtualScrollingContainer';
+import { TankPreview } from './ui/garage/TankPreview';
 
 /**
  * Основной класс игры "СТАЛЬНОЙ РУБЕЖ"
@@ -28,6 +35,16 @@ export class Game implements IDisposable {
   public readonly mapGrid: MapGridSystem;
   public readonly physics: PhysicsSystem;
   public readonly juice: JuiceSystem;
+  public readonly pathfinding: PathfindingSystem;
+  public readonly waveSystem: WaveSystem;
+  public readonly gameOverSequence: GameOverSequence;
+  public readonly roguePerkSystem: RoguePerkSystem;
+  
+  // Garage UI components
+  private garageContainer: PIXI.Container | null = null;
+  private tankPreview: TankPreview | null = null;
+  private virtualScroll: VirtualScrollingContainer | null = null;
+  private isGarageMode: boolean = true;
 
   private _lastFrameTime: number = 0;
   private _isRunning: boolean = false;
@@ -42,6 +59,14 @@ export class Game implements IDisposable {
     this.mapGrid = new MapGridSystem();
     this.physics = new PhysicsSystem(this.mapGrid);
     this.juice = new JuiceSystem(this.app);
+    this.pathfinding = new PathfindingSystem(13, 13);
+    this.waveSystem = new WaveSystem();
+    this.gameOverSequence = new GameOverSequence();
+    this.roguePerkSystem = new RoguePerkSystem();
+
+    // Настройка связей между системами
+    this.pathfinding.setMapGrid(this.mapGrid);
+    this.gameOverSequence.setLayerManager(this.layerManager);
 
     // Сохраняем ссылку на бинд для корректного removeEventListener (Правило 11: Zero-Allocation)
     this._boundOnResize = this.onResize.bind(this);
@@ -99,6 +124,9 @@ export class Game implements IDisposable {
    * Добавление тестовых спрайтов на слои для проверки рендера
    */
   private addTestSprites(): void {
+    // Создаем UI Гаража
+    this.createGarageUI();
+    
     // Спрайт земли на GroundLayer
     const groundTexture = ProceduralTextureFactory.getTexture('ground');
     const groundSprite = new PIXI.Sprite(groundTexture);
@@ -115,13 +143,130 @@ export class Game implements IDisposable {
     wallSprite.scale.set(3);
     this.layerManager.wallLayer.addChild(wallSprite);
 
-    // Тестовая кнопка на UILayer
-    this.addTestUIButton();
-
     // Создаем тестовый танк с физикой
     this.createTestTank();
 
-    console.log('[Game] Test sprites added to layers');
+    console.log('[Game] Test sprites and Garage UI added to layers');
+  }
+
+  /**
+   * Создание UI Гаража с вкладками
+   */
+  private createGarageUI(): void {
+    this.garageContainer = new PIXI.Container();
+    
+    // Фон гаража
+    const bgGraphics = new PIXI.Graphics();
+    bgGraphics.rect(0, 0, GAME_CONFIG.screen.width, GAME_CONFIG.screen.height);
+    bgGraphics.fill(0x1a1a2e);
+    this.garageContainer.addChild(bgGraphics);
+
+    // Заголовок
+    const titleText = new PIXI.BitmapText('СТАЛЬНОЙ РУБЕЖ - ГАРАЖ', {
+      fontFamily: 'PressStart2P',
+      fontSize: 24,
+      fill: 0xffd700,
+    });
+    titleText.x = GAME_CONFIG.screen.width / 2 - titleText.width / 2;
+    titleText.y = 20;
+    this.garageContainer.addChild(titleText);
+
+    // Вкладки
+    const tabs = ['СБОРКА', 'АНГАР', 'КРАФТ', 'БОКСЫ'];
+    let tabX = 50;
+    for (let i = 0; i < tabs.length; i++) {
+      const tabBtn = new UIButton(tabs[i], 16);
+      tabBtn.x = tabX;
+      tabBtn.y = 70;
+      tabBtn.on('pointerdown', () => {
+        this.switchTab(tabs[i]);
+      });
+      this.garageContainer.addChild(tabBtn as unknown as PIXI.Container);
+      tabX += 180;
+    }
+
+    // TankPreview на вкладке СБОРКА
+    this.tankPreview = new TankPreview();
+    this.tankPreview.x = GAME_CONFIG.screen.width / 2;
+    this.tankPreview.y = 300;
+    this.tankPreview.setHover(true);
+    this.garageContainer.addChild(this.tankPreview as unknown as PIXI.Container);
+
+    // Авто-обновление слотов для демонстрации
+    setTimeout(() => {
+      if (this.tankPreview) {
+        this.tankPreview.updateSlot('chassis', 'tank_chassis');
+        console.log('[Garage] Chassis slot updated');
+      }
+    }, 1000);
+    setTimeout(() => {
+      if (this.tankPreview) {
+        this.tankPreview.updateSlot('turret', 'tank_turret');
+        console.log('[Garage] Turret slot updated');
+      }
+    }, 2000);
+    setTimeout(() => {
+      if (this.tankPreview) {
+        this.tankPreview.updateSlot('weapon', 'tank_weapon');
+        console.log('[Garage] Weapon slot updated');
+      }
+    }, 3000);
+
+    // VirtualScrollingContainer на вкладке АНГАР (скрыт по умолчанию)
+    this.virtualScroll = new VirtualScrollingContainer(400, 300);
+    this.virtualScroll.x = GAME_CONFIG.screen.width / 2 - 200;
+    this.virtualScroll.y = 150;
+    this.virtualScroll.visible = false;
+    
+    // Заполняем 100 элементами
+    const items: PIXI.Container[] = [];
+    for (let i = 0; i < 100; i++) {
+      const item = new PIXI.Graphics();
+      item.rect(0, 0, 380, 50);
+      item.fill(0x333355);
+      item.stroke({ width: 1, color: 0x666688 });
+      items.push(item as unknown as PIXI.Container);
+    }
+    this.virtualScroll.setItems(items);
+    
+    this.garageContainer.addChild(this.virtualScroll as unknown as PIXI.Container);
+
+    // Кнопка переключения режима
+    const modeBtn = new UIButton('В БОЙ >>>', 18);
+    modeBtn.x = GAME_CONFIG.screen.width - 200;
+    modeBtn.y = GAME_CONFIG.screen.height - 80;
+    modeBtn.on('pointerdown', () => {
+      this.toggleGameMode();
+    });
+    this.garageContainer.addChild(modeBtn as unknown as PIXI.Container);
+
+    this.layerManager.uiLayer.addChild(this.garageContainer);
+    console.log('[Garage] UI created with tabs, TankPreview, and VirtualScroll');
+  }
+
+  /**
+   * Переключение вкладки гаража
+   */
+  private switchTab(tabName: string): void {
+    console.log(`[Garage] Switched to tab: ${tabName}`);
+    
+    if (this.tankPreview) {
+      this.tankPreview.visible = (tabName === 'сборка');
+    }
+    if (this.virtualScroll) {
+      this.virtualScroll.visible = (tabName === 'ангар');
+    }
+  }
+
+  /**
+   * Переключение режима Гараж/Бой
+   */
+  private toggleGameMode(): void {
+    this.isGarageMode = !this.isGarageMode;
+    if (this.garageContainer) {
+      this.garageContainer.visible = this.isGarageMode;
+    }
+    console.log(`[Game] Mode switched: ${this.isGarageMode ? 'GARAGE' : 'BATTLE'}`);
   }
 
   /**

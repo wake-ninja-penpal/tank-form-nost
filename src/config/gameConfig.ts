@@ -24,6 +24,12 @@ export const GAME_CONFIG = {
     masterVolume: 0.7,
   },
   
+  // Экран
+  screen: {
+    width: 800,
+    height: 600,
+  },
+  
   // Гараж
   garage: {
     slotsCount: 7,
@@ -51,6 +57,12 @@ export const GAME_CONFIG = {
   physics: {
     speedFactor: 1.0,
     entitySize: 40, // Хитбокс 40x40 px
+  },
+  
+  // Карта
+  map: {
+    baseX: 6,
+    baseY: 12,
   },
 } as const;
 
