@@ -1,0 +1,43 @@
+/**
+ * Конфигурация игры "СТАЛЬНОЙ РУБЕЖ"
+ * Единый источник истины для всех магических чисел, балансов и путей.
+ */
+
+export const GAME_CONFIG = {
+  // Рендер
+  render: {
+    preference: 'webgl' as const,
+    pixelArtScale: 1,
+    spriteSize: 32,
+  },
+  
+  // Время (Fixed Timestep)
+  time: {
+    fixedDelta: 1 / 60, // 16.6мс
+    maxAccumulator: 0.25, // Защита от спирали смерти
+  },
+  
+  // Аудио
+  audio: {
+    poolSize: 16,
+    lowPassFrequency: 800, // Hz для режима "Боевой Транс"
+    masterVolume: 0.7,
+  },
+  
+  // Гараж
+  garage: {
+    slotsCount: 7,
+    tankPreviewScale: 2,
+    virtualScrollItemHeight: 60,
+    visibleItemsCount: 5,
+  },
+  
+  // Пулы объектов
+  pools: {
+    bullets: 50,
+    particles: 100,
+    enemies: 20,
+  },
+} as const;
+
+export type GameConfig = typeof GAME_CONFIG;

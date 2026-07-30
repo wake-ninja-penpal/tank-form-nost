@@ -1,0 +1,215 @@
+import { Application } from 'pixi.js';
+import { LayerManager, IDisposable } from './core/LayerManager';
+import { TimeManager } from './core/TimeManager';
+import { PauseSystem } from './systems/PauseSystem';
+import { SaveManager } from './core/SaveManager';
+
+/**
+ * Основной класс игры "СТАЛЬНОЙ РУБЕЖ"
+ * Интегрирует все системы Этапа 1:
+ * - PixiJS v8 с Retina и WebGL (Правило 1, 5)
+ * - Слои рендера (Правило 2)
+ * - Fixed Timestep физика (Правило 4)
+ * - Авто-пауза (Правило 13)
+ * - SaveManager (Правило 14)
+ */
+export class Game implements IDisposable {
+  public readonly app: Application;
+  public readonly layerManager: LayerManager;
+  public readonly timeManager: TimeManager;
+  public readonly pauseSystem: PauseSystem;
+  public readonly saveManager: SaveManager;
+
+  private _lastFrameTime: number = 0;
+  private _isRunning: boolean = false;
+  private _boundOnResize: () => void;
+
+  constructor() {
+    this.app = new Application();
+    this.layerManager = new LayerManager();
+    this.timeManager = new TimeManager();
+    this.pauseSystem = new PauseSystem();
+    this.saveManager = new SaveManager();
+
+    // Сохраняем ссылку на бинд для корректного removeEventListener (Правило 11: Zero-Allocation)
+    this._boundOnResize = this.onResize.bind(this);
+
+    // Настройка callback паузы
+    this.pauseSystem.onPauseCallback = this.onPauseChanged.bind(this);
+
+    // Настройка фиксированного обновления физики
+    this.timeManager.onFixedUpdate = this.fixedUpdate.bind(this);
+  }
+
+  /**
+   * Инициализация игры
+   */
+  public async init(): Promise<void> {
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+
+    // Создание PixiJS приложения с Retina и WebGL
+    await this.app.init({
+      width,
+      height,
+      backgroundColor: 0x0a0a0a,
+      preference: 'webgl',
+      resolution: window.devicePixelRatio || 1,
+      autoDensity: true,
+    });
+
+    // Добавление canvas в DOM
+    const container = document.getElementById('app');
+    if (container) {
+      container.appendChild(this.app.canvas);
+    }
+
+    // Добавление корневого контейнера слоёв на сцену
+    this.app.stage.addChild(this.layerManager.root);
+
+    // Настройка обработки изменения размера окна (Правило 11: Zero-Allocation)
+    window.addEventListener('resize', this._boundOnResize, { passive: true });
+
+    console.log('[Game] Initialized with PixiJS v8, Retina DPI, WebGL');
+  }
+
+  /**
+   * Запуск игрового цикла
+   */
+  public start(): void {
+    if (this._isRunning) {
+      return;
+    }
+
+    this._isRunning = true;
+    this._lastFrameTime = performance.now();
+    
+    // Подписка на тикер PixiJS
+    this.app.ticker.add(this.gameLoop, this);
+
+    console.log('[Game] Started');
+  }
+
+  /**
+   * Остановка игрового цикла
+   */
+  public stop(): void {
+    if (!this._isRunning) {
+      return;
+    }
+
+    this._isRunning = false;
+    this.app.ticker.remove(this.gameLoop, this);
+
+    console.log('[Game] Stopped');
+  }
+
+  /**
+   * Основной игровой цикл (вызывается каждый кадр рендера)
+   * Zero-Allocation: нет аллокаций внутри (Правило 11)
+   */
+  private gameLoop = (): void => {
+    const currentTime = performance.now();
+    const deltaTimeMs = currentTime - this._lastFrameTime;
+    this._lastFrameTime = currentTime;
+
+    // Конвертация в секунды
+    const deltaSeconds = deltaTimeMs / 1000;
+
+    // Обновление менеджера времени (с фиксированным шагом внутри)
+    this.timeManager.update(deltaSeconds);
+
+    // Здесь будет вызов update игровых объектов (variable timestep для рендера)
+    // this.update(deltaSeconds);
+  };
+
+  /**
+   * Фиксированное обновление физики (вызывается TimeManager с шагом 16.6 мс)
+   * Правило 4: Fixed Timestep 60 Hz
+   * Правило 11: Zero-Allocation
+   */
+  private fixedUpdate(_fixedDelta: number): void {
+    // Здесь будет вызов fixedUpdate физических объектов
+    // this.physicsSystem.fixedUpdate(fixedDelta);
+    
+    // Для отладки можно логировать
+    // console.log(`[FixedUpdate] delta=${fixedDelta.toFixed(4)}s`);
+  }
+
+  /**
+   * Обработчик изменения состояния паузы
+   */
+  private onPauseChanged(paused: boolean): void {
+    this.timeManager.setPaused(paused);
+    
+    if (paused) {
+      console.log('[Game] Paused (auto)');
+    } else {
+      console.log('[Game] Resumed');
+      // Сброс lastFrameTime чтобы избежать скачка дельты
+      this._lastFrameTime = performance.now();
+    }
+  }
+
+  /**
+   * Обработка изменения размера окна
+   */
+  private onResize(): void {
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+
+    this.app.renderer.resize(width, height);
+    
+    // Центрирование камеры или адаптация UI может быть добавлена здесь
+    console.log(`[Game] Resized to ${width}x${height}`);
+  }
+
+  /**
+   * Правило 13: Dispose Pattern — полная очистка ресурсов
+   */
+  public dispose(): void {
+    this.stop();
+    
+    // Отписка от событий resize (Правило 11: Zero-Allocation)
+    window.removeEventListener('resize', this._boundOnResize);
+
+    // Dispose систем
+    this.pauseSystem.dispose();
+    this.timeManager.dispose();
+    this.saveManager.dispose();
+    this.layerManager.dispose();
+
+    // Удаление canvas из DOM
+    if (this.app.canvas.parentNode) {
+      this.app.canvas.parentNode.removeChild(this.app.canvas);
+    }
+
+    // Уничтожение PixiJS приложения
+    this.app.destroy(true);
+
+    console.log('[Game] Disposed');
+  }
+}
+
+// Точка входа для запуска игры
+async function main(): Promise<void> {
+  const game = new Game();
+  
+  try {
+    await game.init();
+    game.start();
+    
+    // Сохраняем ссылку на game для отладки в консоли
+    (window as unknown as Record<string, unknown>)['game'] = game;
+    
+  } catch (error) {
+    console.error('[Game] Failed to initialize:', error);
+  }
+}
+
+// Запуск после загрузки DOM
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', main);
+} else {
+  main();
+}
