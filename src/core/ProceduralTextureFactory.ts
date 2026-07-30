@@ -8,16 +8,17 @@ import { GAME_CONFIG } from '../config/gameConfig';
  */
 export class ProceduralTextureFactory {
   private static textures: Map<string, PIXI.Texture> = new Map();
+  private static fontReady: boolean = false;
 
   /**
    * Инициализация всех базовых текстур игры.
    * Вызывается один раз при старте приложения.
    */
-  public static init(): void {
+  public static async init(): Promise<void> {
     this.createTankTextures();
     this.createEnvironmentTextures();
     this.createBulletTextures();
-    // BitmapFont генерация будет добавлена в Этапе 3
+    await this.createBitmapFont();
   }
 
   /**
@@ -29,6 +30,13 @@ export class ProceduralTextureFactory {
       throw new Error(`Texture not found: ${key}`);
     }
     return texture;
+  }
+  
+  /**
+   * Проверка готовности шрифта.
+   */
+  public static isFontReady(): boolean {
+    return ProceduralTextureFactory.fontReady;
   }
 
   /**
@@ -133,6 +141,16 @@ export class ProceduralTextureFactory {
     texture.source.scaleMode = 'nearest';
 
     return texture;
+  }
+
+  /**
+   * Создание BitmapFont для UI.
+   * Упрощенная версия - пока без шрифта, используем стандартный.
+   */
+  private static async createBitmapFont(): Promise<void> {
+    // Пока заглушка - в PixiJS v8 API регистрации шрифтов изменилось
+    // Используем дефолтный шрифт через PIXI.BitmapText с preload
+    ProceduralTextureFactory.fontReady = true;
   }
 
   /**

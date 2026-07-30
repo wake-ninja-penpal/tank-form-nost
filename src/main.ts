@@ -4,6 +4,9 @@ import { TimeManager } from './core/TimeManager';
 import { PauseSystem } from './systems/PauseSystem';
 import { SaveManager } from './core/SaveManager';
 import { ProceduralTextureFactory } from './core/ProceduralTextureFactory';
+import { MapGridSystem } from './systems/MapGridSystem';
+import { PhysicsSystem } from './systems/PhysicsSystem';
+import { JuiceSystem } from './systems/JuiceSystem';
 
 /**
  * Основной класс игры "СТАЛЬНОЙ РУБЕЖ"
@@ -21,6 +24,9 @@ export class Game implements IDisposable {
   public readonly timeManager: TimeManager;
   public readonly pauseSystem: PauseSystem;
   public readonly saveManager: SaveManager;
+  public readonly mapGrid: MapGridSystem;
+  public readonly physics: PhysicsSystem;
+  public readonly juice: JuiceSystem;
 
   private _lastFrameTime: number = 0;
   private _isRunning: boolean = false;
@@ -32,6 +38,9 @@ export class Game implements IDisposable {
     this.timeManager = new TimeManager();
     this.pauseSystem = new PauseSystem();
     this.saveManager = new SaveManager();
+    this.mapGrid = new MapGridSystem();
+    this.physics = new PhysicsSystem(this.mapGrid);
+    this.juice = new JuiceSystem(this.app);
 
     // Сохраняем ссылку на бинд для корректного removeEventListener (Правило 11: Zero-Allocation)
     this._boundOnResize = this.onResize.bind(this);
@@ -199,8 +208,8 @@ export class Game implements IDisposable {
     // Обновление менеджера времени (с фиксированным шагом внутри)
     this.timeManager.update(deltaSeconds);
 
-    // Здесь будет вызов update игровых объектов (variable timestep для рендера)
-    // this.update(deltaSeconds);
+    // Обновление Juice системы (рендер эффектов, тряска, частицы)
+    this.juice.update(this.app.ticker.deltaMS);
   };
 
   /**
@@ -209,11 +218,17 @@ export class Game implements IDisposable {
    * Правило 11: Zero-Allocation
    */
   private fixedUpdate(_fixedDelta: number): void {
-    // Здесь будет вызов fixedUpdate физических объектов
-    // this.physicsSystem.fixedUpdate(fixedDelta);
+    // Вызов физики
+    this.physics.fixedUpdate(_fixedDelta);
     
-    // Для отладки можно логировать
-    // console.log(`[FixedUpdate] delta=${fixedDelta.toFixed(4)}s`);
+    // Проверка разрушения базы
+    const baseCell = this.mapGrid.getBaseCell();
+    if (baseCell && baseCell.type === 0) {
+      // База разрушена - Game Over
+      console.log('[Game] BASE DESTROYED! Game Over');
+      this.juice.startShake(20);
+      this.juice.triggerHitStop(50);
+    }
   }
 
   /**
@@ -258,6 +273,9 @@ export class Game implements IDisposable {
     this.timeManager.dispose();
     this.saveManager.dispose();
     this.layerManager.dispose();
+    this.mapGrid.destroy();
+    this.physics.destroy();
+    this.juice.destroy();
 
     // Удаление canvas из DOM
     if (this.app.canvas.parentNode) {
